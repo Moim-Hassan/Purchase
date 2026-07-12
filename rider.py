@@ -549,7 +549,7 @@ elif panel == "👤 User Panel":
                         st.success(f"✅ Verified: **{nearest['name']}**")
 
                         issues_list = nearest.get("issues", DEFAULT_ISSUES)
-                        selected_issues = st.multiselect("Select issues:", issues_list, key="issue_sel_fb")
+                        selected_issues = st.selectbox("Select issues:", issues_list, key="issue_sel_fb")
                         notes = st.text_area("Notes", key="notes_fb")
 
                         if st.button("📤 Submit", type="primary"):
