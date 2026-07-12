@@ -20,8 +20,14 @@ DATA_FILE = "tracker_data.json"
 # ── GPS Bridge Server ───────────────────────────────────────────────────────
 # A tiny HTTP server that accepts GPS coords from the browser JS
 # and stores them in memory for the Python side to read.
+# Uses sys attributes so the server and data dict survive Streamlit reruns.
 
-_latest_gps = {"lat": None, "lon": None, "error": None}
+import sys
+
+if not hasattr(sys, "_gps_data"):
+    sys._gps_data = {"lat": None, "lon": None, "error": None}
+    sys._gps_server_started = False
+
 _gps_lock = threading.Lock()
 
 class _GPSBridgeHandler(BaseHTTPRequestHandler):
@@ -32,11 +38,11 @@ class _GPSBridgeHandler(BaseHTTPRequestHandler):
             data = json.loads(body)
             with _gps_lock:
                 if "error" in data:
-                    _latest_gps["error"] = data["error"]
+                    sys._gps_data["error"] = data["error"]
                 elif "lat" in data and "lon" in data:
-                    _latest_gps["lat"] = data["lat"]
-                    _latest_gps["lon"] = data["lon"]
-                    _latest_gps["error"] = None
+                    sys._gps_data["lat"] = data["lat"]
+                    sys._gps_data["lon"] = data["lon"]
+                    sys._gps_data["error"] = None
         except Exception:
             pass
         self.send_response(200)
@@ -55,19 +61,23 @@ class _GPSBridgeHandler(BaseHTTPRequestHandler):
         pass
 
 def _start_gps_bridge():
+    if sys._gps_server_started:
+        return True
     try:
         server = HTTPServer(("127.0.0.1", 0), _GPSBridgeHandler)
-        port = server.server_address[1]
+        sys._gps_port = server.server_address[1]
+        sys._gps_server_started = True
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        return port
+        return True
     except Exception:
-        return None
+        return False
 
-_gps_port = _start_gps_bridge()
+_gps_ready = _start_gps_bridge()
+_gps_port = getattr(sys, "_gps_port", None)
 
 def _read_gps():
     with _gps_lock:
-        return _latest_gps["lat"], _latest_gps["lon"], _latest_gps["error"]
+        return sys._gps_data["lat"], sys._gps_data["lon"], sys._gps_data["error"]
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -325,7 +335,7 @@ elif panel == "👤 User Panel":
     # ── GPS Tracker ──────────────────────────────────────────────────────
     st.subheader("📡 Live Location Tracker")
 
-    if _gps_port:
+    if _gps_ready:
         lat, lon, gps_error = _read_gps()
         if lat is not None:
             st.session_state.user_lat = lat
