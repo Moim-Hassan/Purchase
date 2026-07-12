@@ -488,7 +488,7 @@ elif panel == "👤 User Panel":
 
                         st.markdown("### Report Issues")
                         issues_list = target_loc.get("issues", DEFAULT_ISSUES)
-                        selected_issues = st.multiselect("Select issues found:", issues_list, key="issue_sel")
+                        selected_issues = st.selectbox("Select issues found:", issues_list, key="issue_sel")
                         additional_notes = st.text_area("Additional notes (optional)", key="notes_inp")
 
                         if st.button("📤 Submit Report", type="primary", use_container_width=True):
