@@ -101,36 +101,13 @@ def find_nearest(user_lat, user_lon, locations):
 
 # ── GPS TRACKING COMPONENT ──────────────────────────────────────────────────
 
-GPS_COMPONENT = """
-<script>
-function sendLocation() {
-    if (!navigator.geolocation) {
-        return;
-    }
-    navigator.geolocation.watchPosition(
-        function(pos) {
-            var lat = pos.coords.latitude;
-            var lon = pos.coords.longitude;
-            window.parent.postMessage(
-                {type: "streamlit:setComponentValue", value: JSON.stringify({lat: lat, lon: lon})},
-                "*"
-            );
-        },
-        function(err) {},
-        {enableHighAccuracy: true, maximumAge: 0, timeout: 10000}
-    );
-}
-sendLocation();
-</script>
-"""
+_gps_component = components.declare_component(
+    "gps_component",
+    path=os.path.join(os.path.dirname(__file__), "components", "gps"),
+)
 
-GPS_HTML = f"""
-<div style='padding:10px; background:#1a1a2e; border-radius:8px; color:#e0e0e0; font-family:monospace;'>
-<b style='color:#00ff88;'>📡 LIVE GPS TRACKING ACTIVE</b><br>
-<span style='color:#aaa;'>Waiting for GPS data from browser...</span>
-</div>
-{GPS_COMPONENT}
-"""
+def gps_component(key=None):
+    return _gps_component(key=key, default=None)
 
 # ── QR SCANNER COMPONENT ────────────────────────────────────────────────────
 
@@ -264,7 +241,7 @@ elif panel == "👤 User Panel":
 
     gps_col, status_col = st.columns([1, 2])
     with gps_col:
-        gps_val = components.html(GPS_HTML, height=80)
+        gps_val = gps_component(key="gps_tracker")
     with status_col:
         if gps_val:
             try:
