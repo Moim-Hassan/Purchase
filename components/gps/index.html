@@ -1,0 +1,49 @@
+<div style="padding:10px; background:#1a1a2e; border-radius:8px; color:#e0e0e0; font-family:monospace;">
+<b style="color:#00ff88;">&#128225; LIVE GPS TRACKING ACTIVE</b><br>
+<span id="gps-status" style="color:#aaa;">Waiting for GPS data...</span>
+</div>
+<script>
+(function() {
+    var status = document.getElementById("gps-status");
+    var _ready = false;
+    var _lastVal = null;
+
+    function sendToStreamlit(val) {
+        _lastVal = val;
+        if (_ready) {
+            window.parent.postMessage({type: "streamlit:setComponentValue", value: val}, "*");
+        }
+    }
+
+    window.addEventListener("message", function(event) {
+        if (event.data && event.data.type === "streamlit:render") {
+            _ready = true;
+            if (_lastVal !== null) {
+                window.parent.postMessage({type: "streamlit:setComponentValue", value: _lastVal}, "*");
+            }
+        }
+    });
+
+    if (!navigator.geolocation) {
+        status.innerText = "Geolocation not supported";
+        sendToStreamlit(JSON.stringify({error: "Geolocation not supported"}));
+        return;
+    }
+
+    status.innerText = "Requesting location access...";
+
+    navigator.geolocation.watchPosition(
+        function(pos) {
+            var lat = pos.coords.latitude;
+            var lon = pos.coords.longitude;
+            status.innerText = lat.toFixed(6) + ", " + lon.toFixed(6);
+            sendToStreamlit(JSON.stringify({lat: lat, lon: lon}));
+        },
+        function(err) {
+            status.innerText = "Error: " + err.message;
+            sendToStreamlit(JSON.stringify({error: err.message}));
+        },
+        {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000}
+    );
+})();
+</script>
