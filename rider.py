@@ -8,18 +8,44 @@ import qrcode
 import io
 import math
 import requests
+import threading
+import sys
+from http.server import HTTPServer, SimpleHTTPRequestHandler
 from PIL import Image
 
 st.set_page_config(layout="wide", page_title="Location Tracker & QR Scanner", page_icon="📍")
 
 DATA_FILE = "tracker_data.json"
 
-# ── GPS TRACKING COMPONENT ──────────────────────────────────────────────────
+# ── GPS COMPONENT SERVER ────────────────────────────────────────────────────
+# Serve the GPS component HTML on a local port, then use
+# declare_component(url=...) so Streamlit loads it from there.
 
-_gps_component = components.declare_component(
-    "gps_component",
-    path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "gps"),
-)
+_COMPONENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "gps")
+
+if not hasattr(sys, "_gps_component_port"):
+    sys._gps_component_port = None
+
+    class _CompHandler(SimpleHTTPRequestHandler):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, directory=_COMPONENT_DIR, **kw)
+        def log_message(self, *a):
+            pass
+
+    try:
+        _srv = HTTPServer(("127.0.0.1", 0), _CompHandler)
+        sys._gps_component_port = _srv.server_address[1]
+        threading.Thread(target=_srv.serve_forever, daemon=True).start()
+    except Exception:
+        pass
+
+if sys._gps_component_port:
+    _gps_component = components.declare_component(
+        "gps_component",
+        url=f"http://127.0.0.1:{sys._gps_component_port}",
+    )
+else:
+    _gps_component = None
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -236,26 +262,29 @@ elif panel == "👤 User Panel":
     # ── GPS Tracker ──────────────────────────────────────────────────────
     st.subheader("📡 Live Location Tracker")
 
-    gps_col, status_col = st.columns([1, 2])
-    with gps_col:
-        gps_val = _gps_component(key="gps_tracker")
-    with status_col:
-        if gps_val is not None:
-            try:
-                gps_data = json.loads(gps_val)
-                if "error" not in gps_data:
-                    st.session_state.user_lat = gps_data["lat"]
-                    st.session_state.user_lon = gps_data["lon"]
-                    st.success(f"📍 Your Location: {gps_data['lat']:.6f}, {gps_data['lon']:.6f}")
-                else:
-                    st.error(f"GPS Error: {gps_data['error']}")
-            except (json.JSONDecodeError, TypeError):
-                pass
+    if _gps_component is None:
+        st.error("GPS component server failed to start.")
+    else:
+        gps_col, status_col = st.columns([1, 2])
+        with gps_col:
+            gps_val = _gps_component(key="gps_tracker")
+        with status_col:
+            if gps_val is not None:
+                try:
+                    gps_data = json.loads(gps_val)
+                    if "error" not in gps_data:
+                        st.session_state.user_lat = gps_data["lat"]
+                        st.session_state.user_lon = gps_data["lon"]
+                        st.success(f"📍 Your Location: {gps_data['lat']:.6f}, {gps_data['lon']:.6f}")
+                    else:
+                        st.error(f"GPS Error: {gps_data['error']}")
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
-        if st.session_state.user_lat is not None and gps_val is None:
-            st.success(f"📍 Your Location: {st.session_state.user_lat:.6f}, {st.session_state.user_lon:.6f}")
-        elif st.session_state.user_lat is None and gps_val is None:
-            st.info("Waiting for GPS coordinates... Allow location access in your browser.")
+            if st.session_state.user_lat is not None and gps_val is None:
+                st.success(f"📍 Your Location: {st.session_state.user_lat:.6f}, {st.session_state.user_lon:.6f}")
+            elif st.session_state.user_lat is None and gps_val is None:
+                st.info("Waiting for GPS coordinates... Allow location access in your browser.")
 
     st.divider()
 
