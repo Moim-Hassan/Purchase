@@ -5,21 +5,51 @@
       "name": "Rokomari",
       "lat": 23.729221059451092,
       "lon": 90.42257835655015,
-      "issues": []
+      "issues": [
+        "Company closed",
+        "Product not available",
+        "Store not found",
+        "Wrong location",
+        "Out of stock",
+        "Address not found",
+        "No response",
+        "Damaged goods",
+        "Other"
+      ]
     },
     {
       "id": "2",
       "name": "Kamalaur",
       "lat": 23.73187852733558,
       "lon": 90.42586919422376,
-      "issues": []
+      "issues": [
+        "Company closed",
+        "Product not available",
+        "Store not found",
+        "Wrong location",
+        "Out of stock",
+        "Address not found",
+        "No response",
+        "Damaged goods",
+        "Other"
+      ]
     },
     {
       "id": "3",
       "name": "TT para under pass",
       "lat": 23.72559452037645,
       "lon": 90.42542257001648,
-      "issues": []
+      "issues": [
+        "Company closed",
+        "Product not available",
+        "Store not found",
+        "Wrong location",
+        "Out of stock",
+        "Address not found",
+        "No response",
+        "Damaged goods",
+        "Other"
+      ]
     }
   ],
   "reports": []
