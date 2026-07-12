@@ -1,49 +1,17 @@
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
-import numpy as np
 import json
 import os
 import qrcode
 import io
 import math
 import requests
-import threading
-import sys
-from http.server import HTTPServer, SimpleHTTPRequestHandler
 from PIL import Image
 
 st.set_page_config(layout="wide", page_title="Rider App - Route & QR Scanner", page_icon="📍")
 
 DATA_FILE = "tracker_data.json"
-
-# ── GPS COMPONENT SERVER ────────────────────────────────────────────────────
-
-_COMPONENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "gps")
-
-if not hasattr(sys, "_gps_component_port"):
-    sys._gps_component_port = None
-
-    class _CompHandler(SimpleHTTPRequestHandler):
-        def __init__(self, *a, **kw):
-            super().__init__(*a, directory=_COMPONENT_DIR, **kw)
-        def log_message(self, *a):
-            pass
-
-    try:
-        _srv = HTTPServer(("127.0.0.1", 0), _CompHandler)
-        sys._gps_component_port = _srv.server_address[1]
-        threading.Thread(target=_srv.serve_forever, daemon=True).start()
-    except Exception:
-        pass
-
-if sys._gps_component_port:
-    _gps_component = components.declare_component(
-        "gps_component",
-        url=f"http://127.0.0.1:{sys._gps_component_port}",
-    )
-else:
-    _gps_component = None
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -205,6 +173,33 @@ def find_nearest(user_lat, user_lon, locations):
             min_idx = i
     return min_idx, min_dist
 
+def gps_component_html():
+    return """
+<div style="padding:10px;background:#1a1a2e;border-radius:8px;color:#e0e0e0;font-family:monospace;text-align:center;">
+  <div style="color:#00ff88;font-weight:bold;margin-bottom:6px;">&#128225; LIVE GPS</div>
+  <div id="gps-status" style="color:#aaa;font-size:14px;">Waiting for GPS signal...</div>
+  <div id="gps-coords" style="color:#fff;font-size:18px;font-weight:bold;margin-top:4px;"></div>
+</div>
+<script>
+(function(){
+  var s=document.getElementById('gps-status'),c=document.getElementById('gps-coords');
+  function send(v){ window.parent.postMessage({type:'streamlit:setComponentValue',value:JSON.stringify(v)},'*'); }
+  if(!navigator.geolocation){ s.textContent='Geolocation not supported'; send({error:'Geolocation not supported'}); return; }
+  s.textContent='Requesting location access...';
+  navigator.geolocation.watchPosition(
+    function(p){
+      var lat=p.coords.latitude,lon=p.coords.longitude;
+      c.textContent=lat.toFixed(6)+', '+lon.toFixed(6);
+      s.textContent='GPS Active';
+      send({lat:lat,lon:lon});
+    },
+    function(e){ s.textContent='Error: '+e.message; send({error:e.message}); },
+    {enableHighAccuracy:true,maximumAge:5000,timeout:15000}
+  );
+})();
+</script>
+"""
+
 def qr_scanner_html():
     return """
     <div id="qr-reader" style="width:100%; max-width:400px; margin:0 auto;"></div>
@@ -343,10 +338,7 @@ elif panel == "👤 User Panel":
         gps_col, status_col = st.columns([1, 2])
         with gps_col:
             st.subheader("📡 GPS")
-            if _gps_component is None:
-                st.error("GPS component failed to start.")
-            else:
-                gps_val = _gps_component(key="gps_tracker")
+            gps_val = components.html(gps_component_html(), height=100)
         with status_col:
             st.subheader("📍 Your Position")
             if gps_val is not None:
