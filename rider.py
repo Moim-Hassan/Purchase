@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import json
 import os
+import pathlib
 import qrcode
 import io
 import math
@@ -103,7 +104,7 @@ def find_nearest(user_lat, user_lon, locations):
 
 _gps_component = components.declare_component(
     "gps_component",
-    path=os.path.join(os.path.dirname(__file__), "components", "gps"),
+    path=str(pathlib.Path(__file__).parent / "components" / "gps"),
 )
 
 def gps_component(key=None):
@@ -246,8 +247,9 @@ elif panel == "👤 User Panel":
         if gps_val:
             try:
                 gps_data = json.loads(gps_val)
-                st.session_state.user_lat = gps_data["lat"]
-                st.session_state.user_lon = gps_data["lon"]
+                if "error" not in gps_data:
+                    st.session_state.user_lat = gps_data["lat"]
+                    st.session_state.user_lon = gps_data["lon"]
             except (json.JSONDecodeError, TypeError):
                 pass
 
