@@ -3,52 +3,99 @@
 <head><meta charset="utf-8"></head>
 <body>
 <div style="padding:10px; background:#1a1a2e; border-radius:8px; color:#e0e0e0; font-family:monospace;">
-<b style="color:#00ff88;">&#128225; LIVE GPS TRACKING ACTIVE</b><br>
-<span id="gps-status" style="color:#aaa;">Waiting for GPS data...</span>
+<b style="color:#00ff88;">&#128225; GPS TRACKING</b><br>
+<span id="gps-status" style="color:#aaa;">Starting...</span>
 </div>
 <script>
 (function() {
     var status = document.getElementById("gps-status");
-    var _ready = false;
-    var _lastVal = null;
+    var lastLat = null;
+    var lastLon = null;
+    var watchId = null;
 
-    function sendToStreamlit(val) {
-        _lastVal = val;
-        if (_ready) {
-            window.parent.postMessage({type: "streamlit:setComponentValue", value: val}, "*");
-        }
+    // ── Core fix: every outgoing message to Streamlit MUST include
+    // isStreamlitMessage: true, or Streamlit's parent-frame listener
+    // silently ignores it entirely (no error, nothing — just dropped).
+    function postToStreamlit(type, data) {
+        var msg = Object.assign({ isStreamlitMessage: true, type: type }, data || {});
+        window.parent.postMessage(msg, "*");
     }
 
+    function send(v) {
+        postToStreamlit("streamlit:setComponentValue", { value: v, dataType: "json" });
+    }
+
+    function setFrameHeight() {
+        postToStreamlit("streamlit:setFrameHeight", {
+            height: document.body.scrollHeight || 80
+        });
+    }
+
+    // Step 1: Immediately signal readiness to Streamlit
+    postToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+
+    // Step 2: Set an explicit frame height so the iframe doesn't render
+    // collapsed (height 0) before content settles
+    setFrameHeight();
+
+    // Step 3: Send cached position from localStorage if available
+    var cached = localStorage.getItem("rider_gps");
+    if (cached) {
+        try {
+            var p = JSON.parse(cached);
+            status.innerText = "Cached: " + p.lat.toFixed(6) + ", " + p.lon.toFixed(6);
+            send(cached);
+            lastLat = p.lat;
+            lastLon = p.lon;
+        } catch(e) {}
+    }
+
+    // Step 4: Start live GPS tracking
+    if (!navigator.geolocation) {
+        status.innerText = "Geolocation not supported";
+        if (lastLat === null) send(JSON.stringify({error: "Geolocation not supported"}));
+    } else {
+        status.innerText = cached ? "Updating..." : "Requesting location access...";
+        watchId = navigator.geolocation.watchPosition(
+            function(pos) {
+                lastLat = pos.coords.latitude;
+                lastLon = pos.coords.longitude;
+                var val = JSON.stringify({lat: lastLat, lon: lastLon});
+                localStorage.setItem("rider_gps", val);
+                status.innerText = lastLat.toFixed(6) + ", " + lastLon.toFixed(6);
+                send(val);
+                setFrameHeight();
+            },
+            function(err) {
+                if (lastLat === null) {
+                    status.innerText = "Error: " + err.message;
+                    var cached2 = localStorage.getItem("rider_gps");
+                    if (cached2) {
+                        try {
+                            var p = JSON.parse(cached2);
+                            status.innerText = "Fallback: " + p.lat.toFixed(6) + ", " + p.lon.toFixed(6);
+                            send(cached2);
+                        } catch(e) {
+                            send(JSON.stringify({error: err.message}));
+                        }
+                    } else {
+                        send(JSON.stringify({error: err.message}));
+                    }
+                    setFrameHeight();
+                }
+            },
+            {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000}
+        );
+    }
+
+    // Step 5: Handle re-render events (resend last known position)
     window.addEventListener("message", function(event) {
         if (event.data && event.data.type === "streamlit:render") {
-            _ready = true;
-            if (_lastVal !== null) {
-                window.parent.postMessage({type: "streamlit:setComponentValue", value: _lastVal}, "*");
+            if (lastLat !== null) {
+                send(JSON.stringify({lat: lastLat, lon: lastLon}));
             }
         }
     });
-
-    if (!navigator.geolocation) {
-        status.innerText = "Geolocation not supported";
-        sendToStreamlit(JSON.stringify({error: "Geolocation not supported"}));
-        return;
-    }
-
-    status.innerText = "Requesting location access...";
-
-    navigator.geolocation.watchPosition(
-        function(pos) {
-            var lat = pos.coords.latitude;
-            var lon = pos.coords.longitude;
-            status.innerText = lat.toFixed(6) + ", " + lon.toFixed(6);
-            sendToStreamlit(JSON.stringify({lat: lat, lon: lon}));
-        },
-        function(err) {
-            status.innerText = "Error: " + err.message;
-            sendToStreamlit(JSON.stringify({error: err.message}));
-        },
-        {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000}
-    );
 })();
 </script>
 </body>

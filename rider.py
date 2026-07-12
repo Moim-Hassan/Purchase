@@ -13,6 +13,21 @@ st.set_page_config(layout="wide", page_title="Rider App - Route & QR Scanner", p
 
 DATA_FILE = "tracker_data.json"
 
+# ── GPS & QR Components (declare_component with local paths) ────────────────
+
+_COMPONENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "gps")
+
+_COMPONENTS_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "components")
+
+_gps_component = components.declare_component(
+    "rider_gps",
+    path=os.path.join(_COMPONENTS_BASE, "gps"),
+)
+_qr_component = components.declare_component(
+    "rider_qr",
+    path=os.path.join(_COMPONENTS_BASE, "qr"),
+)
+
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
@@ -173,56 +188,6 @@ def find_nearest(user_lat, user_lon, locations):
             min_idx = i
     return min_idx, min_dist
 
-def gps_component_html():
-    return """
-<div style="padding:10px;background:#1a1a2e;border-radius:8px;color:#e0e0e0;font-family:monospace;text-align:center;">
-  <div style="color:#00ff88;font-weight:bold;margin-bottom:6px;">&#128225; LIVE GPS</div>
-  <div id="gps-status" style="color:#aaa;font-size:14px;">Waiting for GPS signal...</div>
-  <div id="gps-coords" style="color:#fff;font-size:18px;font-weight:bold;margin-top:4px;"></div>
-</div>
-<script>
-(function(){
-  var s=document.getElementById('gps-status'),c=document.getElementById('gps-coords');
-  function send(v){ window.parent.postMessage({type:'streamlit:setComponentValue',value:JSON.stringify(v)},'*'); }
-  if(!navigator.geolocation){ s.textContent='Geolocation not supported'; send({error:'Geolocation not supported'}); return; }
-  s.textContent='Requesting location access...';
-  navigator.geolocation.watchPosition(
-    function(p){
-      var lat=p.coords.latitude,lon=p.coords.longitude;
-      c.textContent=lat.toFixed(6)+', '+lon.toFixed(6);
-      s.textContent='GPS Active';
-      send({lat:lat,lon:lon});
-    },
-    function(e){ s.textContent='Error: '+e.message; send({error:e.message}); },
-    {enableHighAccuracy:true,maximumAge:5000,timeout:15000}
-  );
-})();
-</script>
-"""
-
-def qr_scanner_html():
-    return """
-    <div id="qr-reader" style="width:100%; max-width:400px; margin:0 auto;"></div>
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-    <script>
-    var lastResult = "";
-    var scanner = new Html5Qrcode("qr-reader");
-    scanner.start(
-        {facingMode: "environment"},
-        {fps: 10, qrbox: 250},
-        function onScanSuccess(decodedText) {
-            if (decodedText !== lastResult) {
-                lastResult = decodedText;
-                window.parent.postMessage(
-                    {type: "streamlit:setComponentValue", value: decodedText},
-                    "*"
-                );
-            }
-        },
-        function onScanFailure() {}
-    );
-    </script>
-    """
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────
 
@@ -338,7 +303,7 @@ elif panel == "👤 User Panel":
         gps_col, status_col = st.columns([1, 2])
         with gps_col:
             st.subheader("📡 GPS")
-            gps_val = components.html(gps_component_html(), height=100)
+            gps_val = _gps_component(key="rider_gps_tracker")
         with status_col:
             st.subheader("📍 Your Position")
             if gps_val is not None:
@@ -506,7 +471,7 @@ elif panel == "👤 User Panel":
             if dist <= 50:
                 st.success(f"✅ You've arrived at **{target_loc['name']}** — QR scanner unlocked!")
 
-                scanned_result = components.html(qr_scanner_html(), height=350)
+                scanned_result = _qr_component(key="qr_target")
 
                 if scanned_result and scanned_result != st.session_state.last_scan_result:
                     st.session_state.last_scan_result = scanned_result
@@ -568,7 +533,7 @@ elif panel == "👤 User Panel":
             if nearest and nearest_dist <= 50:
                 st.success(f"✅ Near **{nearest['name']}** — scanner unlocked!")
 
-                scanned_result = components.html(qr_scanner_html(), height=350)
+                scanned_result = _qr_component(key="qr_nearest")
 
                 if scanned_result and scanned_result != st.session_state.last_scan_result:
                     st.session_state.last_scan_result = scanned_result
