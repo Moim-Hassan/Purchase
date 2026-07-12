@@ -107,7 +107,7 @@ def osrm_route(coords):
     coords_str = ";".join(f"{lon},{lat}" for lat, lon in coords)
     url = f"http://router.project-osrm.org/route/v1/driving/{coords_str}?overview=full&geometries=geojson&steps=true"
     try:
-        r = requests.get(url, timeout=15)
+        r = requests.get(url, timeout=100)
         r.raise_for_status()
         return r.json()
     except Exception:
