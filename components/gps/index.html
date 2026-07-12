@@ -13,9 +13,26 @@
     var lastLon = null;
     var watchId = null;
 
-    // ── Core fix: every outgoing message to Streamlit MUST include
-    // isStreamlitMessage: true, or Streamlit's parent-frame listener
-    // silently ignores it entirely (no error, nothing — just dropped).
+    // ── Throttle settings: only push a new value to Streamlit (which
+    // triggers a full script rerun) when the rider has moved a real
+    // distance AND enough time has passed. This stops GPS jitter from
+    // causing the map to rebuild continuously.
+    var MIN_MOVE_METERS = 8;
+    var MIN_INTERVAL_MS = 4000;
+    var lastSentLat = null;
+    var lastSentLon = null;
+    var lastSentTime = 0;
+
+    function haversineMeters(lat1, lon1, lat2, lon2) {
+        var R = 6371000;
+        var toRad = function(d) { return d * Math.PI / 180; };
+        var dphi = toRad(lat2 - lat1);
+        var dlam = toRad(lon2 - lon1);
+        var a = Math.sin(dphi/2) ** 2 +
+                Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dlam/2) ** 2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
     function postToStreamlit(type, data) {
         var msg = Object.assign({ isStreamlitMessage: true, type: type }, data || {});
         window.parent.postMessage(msg, "*");
@@ -33,12 +50,9 @@
 
     // Step 1: Immediately signal readiness to Streamlit
     postToStreamlit("streamlit:componentReady", { apiVersion: 1 });
-
-    // Step 2: Set an explicit frame height so the iframe doesn't render
-    // collapsed (height 0) before content settles
     setFrameHeight();
 
-    // Step 3: Send cached position from localStorage if available
+    // Step 2: Send cached position from localStorage if available
     var cached = localStorage.getItem("rider_gps");
     if (cached) {
         try {
@@ -47,10 +61,13 @@
             send(cached);
             lastLat = p.lat;
             lastLon = p.lon;
+            lastSentLat = p.lat;
+            lastSentLon = p.lon;
+            lastSentTime = Date.now();
         } catch(e) {}
     }
 
-    // Step 4: Start live GPS tracking
+    // Step 3: Start live GPS tracking
     if (!navigator.geolocation) {
         status.innerText = "Geolocation not supported";
         if (lastLat === null) send(JSON.stringify({error: "Geolocation not supported"}));
@@ -60,11 +77,26 @@
             function(pos) {
                 lastLat = pos.coords.latitude;
                 lastLon = pos.coords.longitude;
+
+                // Always cache locally so the value is fresh on reload,
+                // but only PUSH to Streamlit (triggering a rerun) when
+                // it's a meaningful update.
                 var val = JSON.stringify({lat: lastLat, lon: lastLon});
                 localStorage.setItem("rider_gps", val);
                 status.innerText = lastLat.toFixed(6) + ", " + lastLon.toFixed(6);
-                send(val);
-                setFrameHeight();
+
+                var now = Date.now();
+                var movedEnough = (lastSentLat === null) ||
+                    haversineMeters(lastSentLat, lastSentLon, lastLat, lastLon) >= MIN_MOVE_METERS;
+                var timeEnough = (now - lastSentTime) >= MIN_INTERVAL_MS;
+
+                if (movedEnough && timeEnough) {
+                    send(val);
+                    setFrameHeight();
+                    lastSentLat = lastLat;
+                    lastSentLon = lastLon;
+                    lastSentTime = now;
+                }
             },
             function(err) {
                 if (lastLat === null) {
@@ -88,10 +120,14 @@
         );
     }
 
-    // Step 5: Handle re-render events (resend last known position)
+    // Step 4: Handle re-render events (resend last known SENT position,
+    // not the raw last position, so a re-render doesn't itself trigger
+    // a spurious "moved" update)
     window.addEventListener("message", function(event) {
         if (event.data && event.data.type === "streamlit:render") {
-            if (lastLat !== null) {
+            if (lastSentLat !== null) {
+                send(JSON.stringify({lat: lastSentLat, lon: lastSentLon}));
+            } else if (lastLat !== null) {
                 send(JSON.stringify({lat: lastLat, lon: lastLon}));
             }
         }

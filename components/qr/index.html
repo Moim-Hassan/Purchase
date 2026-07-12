@@ -3,23 +3,39 @@
 <head><meta charset="utf-8"></head>
 <body>
 <div id="qr-reader" style="width:100%; max-width:400px; margin:0 auto;"></div>
+<div id="qr-status" style="text-align:center; font-family:monospace; color:#aaa; margin-top:6px;"></div>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
 (function() {
     var lastResult = "";
+    var statusEl = document.getElementById("qr-status");
 
-    function send(v) {
-        window.parent.postMessage({type: "streamlit:setComponentValue", value: v}, "*");
+    function postToStreamlit(type, data) {
+        var msg = Object.assign({ isStreamlitMessage: true, type: type }, data || {});
+        window.parent.postMessage(msg, "*");
     }
 
-    // Signal readiness immediately (do NOT wait for streamlit:render)
-    window.parent.postMessage({type: "streamlit:componentReady", apiVersion: 1}, "*");
+    function send(v) {
+        postToStreamlit("streamlit:setComponentValue", { value: v, dataType: "json" });
+    }
 
-    // Start QR scanner (it will be hidden until streamlit:render makes iframe visible)
+    function setFrameHeight() {
+        postToStreamlit("streamlit:setFrameHeight", {
+            height: document.body.scrollHeight || 400
+        });
+    }
+
+    // Step 1: Signal readiness immediately
+    postToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+
+    // Step 2: Give the iframe real height so the camera view is visible
+    setFrameHeight();
+
+    // Step 3: Start QR scanner
     var scanner = new Html5Qrcode("qr-reader");
     scanner.start(
-        {facingMode: "environment"},
-        {fps: 10, qrbox: 250},
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
         function onScanSuccess(decodedText) {
             if (decodedText !== lastResult) {
                 lastResult = decodedText;
@@ -27,7 +43,24 @@
             }
         },
         function onScanFailure() {}
-    );
+    ).then(function() {
+        statusEl.innerText = "Camera active — point at QR code";
+        // Camera video element loads async — resize the frame again
+        // shortly after start() resolves so it isn't clipped
+        setTimeout(setFrameHeight, 500);
+    }).catch(function(err) {
+        statusEl.innerText = "Camera error: " + err;
+        setFrameHeight();
+    });
+
+    // Resend last scan on re-render, so a Streamlit rerun doesn't lose it
+    window.addEventListener("message", function(event) {
+        if (event.data && event.data.type === "streamlit:render") {
+            if (lastResult) {
+                send(lastResult);
+            }
+        }
+    });
 })();
 </script>
 </body>
