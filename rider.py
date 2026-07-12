@@ -4,16 +4,70 @@ import pandas as pd
 import numpy as np
 import json
 import os
-import pathlib
 import qrcode
 import io
 import math
 import requests
+import threading
+import time
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from PIL import Image
 
 st.set_page_config(layout="wide", page_title="Location Tracker & QR Scanner", page_icon="📍")
 
 DATA_FILE = "tracker_data.json"
+
+# ── GPS Bridge Server ───────────────────────────────────────────────────────
+# A tiny HTTP server that accepts GPS coords from the browser JS
+# and stores them in memory for the Python side to read.
+
+_latest_gps = {"lat": None, "lon": None, "error": None}
+_gps_lock = threading.Lock()
+
+class _GPSBridgeHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        try:
+            data = json.loads(body)
+            with _gps_lock:
+                if "error" in data:
+                    _latest_gps["error"] = data["error"]
+                elif "lat" in data and "lon" in data:
+                    _latest_gps["lat"] = data["lat"]
+                    _latest_gps["lon"] = data["lon"]
+                    _latest_gps["error"] = None
+        except Exception:
+            pass
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
+    def log_message(self, fmt, *args):
+        pass
+
+def _start_gps_bridge():
+    try:
+        server = HTTPServer(("127.0.0.1", 0), _GPSBridgeHandler)
+        port = server.server_address[1]
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return port
+    except Exception:
+        return None
+
+_gps_port = _start_gps_bridge()
+
+def _read_gps():
+    with _gps_lock:
+        return _latest_gps["lat"], _latest_gps["lon"], _latest_gps["error"]
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -102,13 +156,44 @@ def find_nearest(user_lat, user_lon, locations):
 
 # ── GPS TRACKING COMPONENT ──────────────────────────────────────────────────
 
-_gps_component = components.declare_component(
-    "gps_component",
-    path=str(pathlib.Path(__file__).parent / "components" / "gps"),
-)
-
-def gps_component(key=None):
-    return _gps_component(key=key, default=None)
+def _gps_html(port):
+    return f"""
+<div style="padding:10px; background:#1a1a2e; border-radius:8px; color:#e0e0e0; font-family:monospace;">
+<b style="color:#00ff88;">&#128225; LIVE GPS TRACKING ACTIVE</b><br>
+<span id="gps-status" style="color:#aaa;">Waiting for GPS data...</span>
+</div>
+<script>
+(function() {{
+    var status = document.getElementById("gps-status");
+    if (!navigator.geolocation) {{
+        status.innerText = "Geolocation not supported by your browser";
+        return;
+    }}
+    status.innerText = "Requesting location access...";
+    navigator.geolocation.watchPosition(
+        function(pos) {{
+            var lat = pos.coords.latitude;
+            var lon = pos.coords.longitude;
+            status.innerText = lat.toFixed(6) + ", " + lon.toFixed(6);
+            fetch("http://127.0.0.1:{port}/", {{
+                method: "POST",
+                headers: {{"Content-Type": "application/json"}},
+                body: JSON.stringify({{lat: lat, lon: lon}})
+            }});
+        }},
+        function(err) {{
+            status.innerText = "GPS Error: " + err.message + " (allow location access)";
+            fetch("http://127.0.0.1:{port}/", {{
+                method: "POST",
+                headers: {{"Content-Type": "application/json"}},
+                body: JSON.stringify({{error: err.message}})
+            }});
+        }},
+        {{enableHighAccuracy: true, maximumAge: 5000, timeout: 15000}}
+    );
+}})();
+</script>
+"""
 
 # ── QR SCANNER COMPONENT ────────────────────────────────────────────────────
 
@@ -240,23 +325,32 @@ elif panel == "👤 User Panel":
     # ── GPS Tracker ──────────────────────────────────────────────────────
     st.subheader("📡 Live Location Tracker")
 
-    gps_col, status_col = st.columns([1, 2])
-    with gps_col:
-        gps_val = gps_component(key="gps_tracker")
-    with status_col:
-        if gps_val:
-            try:
-                gps_data = json.loads(gps_val)
-                if "error" not in gps_data:
-                    st.session_state.user_lat = gps_data["lat"]
-                    st.session_state.user_lon = gps_data["lon"]
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        if st.session_state.user_lat is not None:
-            st.success(f"📍 Your Location: {st.session_state.user_lat:.6f}, {st.session_state.user_lon:.6f}")
-        else:
-            st.info("Waiting for GPS coordinates... Allow location access in your browser.")
+    if _gps_port:
+        gps_col, status_col = st.columns([1, 2])
+        with gps_col:
+            components.html(_gps_html(_gps_port), height=80)
+        with status_col:
+            lat, lon, gps_error = _read_gps()
+            if lat is not None:
+                st.session_state.user_lat = lat
+                st.session_state.user_lon = lon
+                st.success(f"📍 Your Location: {lat:.6f}, {lon:.6f}")
+            elif st.session_state.user_lat is not None:
+                st.success(f"📍 Your Location: {st.session_state.user_lat:.6f}, {st.session_state.user_lon:.6f}")
+            elif gps_error:
+                st.error(f"GPS Error: {gps_error}")
+            else:
+                st.info("Waiting for GPS coordinates... Allow location access in your browser.")
+                if "gps_attempts" not in st.session_state:
+                    st.session_state.gps_attempts = 0
+                st.session_state.gps_attempts += 1
+                if st.session_state.gps_attempts < 15:
+                    time.sleep(2)
+                    st.rerun()
+                else:
+                    st.warning("GPS acquisition timed out. Please check your browser settings and reload.")
+    else:
+        st.error("GPS bridge server failed to start. Check port availability.")
 
     st.divider()
 
