@@ -326,20 +326,22 @@ elif panel == "👤 User Panel":
     st.subheader("📡 Live Location Tracker")
 
     if _gps_port:
-        gps_col, status_col = st.columns([1, 2])
-        with gps_col:
-            components.html(_gps_html(_gps_port), height=80)
-        with status_col:
-            lat, lon, gps_error = _read_gps()
-            if lat is not None:
-                st.session_state.user_lat = lat
-                st.session_state.user_lon = lon
-                st.success(f"📍 Your Location: {lat:.6f}, {lon:.6f}")
-            elif st.session_state.user_lat is not None:
-                st.success(f"📍 Your Location: {st.session_state.user_lat:.6f}, {st.session_state.user_lon:.6f}")
-            elif gps_error:
-                st.error(f"GPS Error: {gps_error}")
-            else:
+        lat, lon, gps_error = _read_gps()
+        if lat is not None:
+            st.session_state.user_lat = lat
+            st.session_state.user_lon = lon
+            if "gps_attempts" in st.session_state:
+                del st.session_state.gps_attempts
+            st.success(f"📍 Your Location: {lat:.6f}, {lon:.6f}")
+        elif st.session_state.user_lat is not None:
+            st.success(f"📍 Your Location: {st.session_state.user_lat:.6f}, {st.session_state.user_lon:.6f}")
+        elif gps_error:
+            st.error(f"GPS Error: {gps_error}")
+        else:
+            gps_col, status_col = st.columns([1, 2])
+            with gps_col:
+                components.html(_gps_html(_gps_port), height=80)
+            with status_col:
                 st.info("Waiting for GPS coordinates... Allow location access in your browser.")
                 if "gps_attempts" not in st.session_state:
                     st.session_state.gps_attempts = 0
