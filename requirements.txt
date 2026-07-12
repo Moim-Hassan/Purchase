@@ -1,0 +1,8 @@
+streamlit
+pandas
+numpy
+qrcode[pil]
+folium
+streamlit-folium
+requests
+Pillow
