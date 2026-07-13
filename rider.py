@@ -13,6 +13,14 @@ st.set_page_config(layout="wide", page_title="Rider App - Route & QR Scanner", p
 
 DATA_FILE = "tracker_data.json"
 
+# ── Auto-refresh (drives the "live" feel of the map) ─────────────────────────
+# pip install streamlit-autorefresh
+try:
+    from streamlit_autorefresh import st_autorefresh
+    HAS_AUTOREFRESH = True
+except ImportError:
+    HAS_AUTOREFRESH = False
+
 # ── GPS & QR Components (declare_component with local paths) ────────────────
 
 _COMPONENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "gps")
@@ -189,6 +197,87 @@ def find_nearest(user_lat, user_lon, locations):
     return min_idx, min_dist
 
 
+def render_live_map(container, lat, lon, locations=None, optimal_order=None,
+                     visited_indices=None, current_target_idx=None,
+                     route_geometry=None, key="live_map", zoom=17, height=450):
+    """
+    Renders a Google-Maps-style live map: CARTO Voyager tiles (closest free
+    look-alike to Google's basemap), a pulsing 'you are here' dot, optional
+    route markers/polyline, and a LocateControl recenter button.
+    """
+    try:
+        import folium
+        from folium.plugins import LocateControl
+        from streamlit_folium import st_folium
+    except ImportError:
+        container.warning("Install `folium` and `streamlit-folium` for the live map (`pip install folium streamlit-folium`).")
+        return
+
+    m = folium.Map(
+        location=[lat, lon],
+        zoom_start=zoom,
+        tiles="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+        attr='&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors',
+        control_scale=True,
+    )
+
+    # "You are here" pulsing blue dot, Google-Maps style
+    pulse_html = """
+    <div style="position:relative; width:22px; height:22px;">
+      <div style="position:absolute; top:0; left:0; width:22px; height:22px;
+                  background:rgba(66,133,244,0.35); border-radius:50%;
+                  animation:riderPulse 1.6s infinite;"></div>
+      <div style="position:absolute; top:6px; left:6px; width:10px; height:10px;
+                  background:#4285F4; border:2px solid white; border-radius:50%;
+                  box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>
+    </div>
+    <style>
+    @keyframes riderPulse {
+        0%   { transform:scale(0.6); opacity:0.9; }
+        70%  { transform:scale(2.4); opacity:0; }
+        100% { transform:scale(2.4); opacity:0; }
+    }
+    </style>
+    """
+    folium.Marker(
+        [lat, lon],
+        tooltip="You are here",
+        icon=folium.DivIcon(html=pulse_html, icon_size=(22, 22), icon_anchor=(11, 11)),
+        z_index_offset=1000,
+    ).add_to(m)
+
+    if locations and optimal_order is not None:
+        visited_indices = visited_indices or set()
+        for rank, idx in enumerate(optimal_order):
+            loc = locations[idx]
+            visited = idx in visited_indices
+            is_current = idx == current_target_idx
+            if visited:
+                color, icon_name = "green", "check-circle"
+            elif is_current:
+                color, icon_name = "orange", "flag"
+            else:
+                color, icon_name = "blue", "map-marker"
+            folium.Marker(
+                [loc["lat"], loc["lon"]],
+                tooltip=f"{'✅ ' if visited else ''}{loc['name']} (stop #{rank+1})",
+                icon=folium.Icon(color=color, icon=icon_name, prefix="fa"),
+            ).add_to(m)
+
+        if route_geometry:
+            route_coords = [[c[1], c[0]] for c in route_geometry]
+            folium.PolyLine(route_coords, color="#4285F4", weight=6, opacity=0.85).add_to(m)
+
+    LocateControl(auto_start=False, flyTo=True).add_to(m)
+
+    # Re-keying on rounded coordinates makes the map recenter when the
+    # rider's position actually changes, without resetting the user's
+    # pan/zoom on every single 15s refresh tick if they haven't moved.
+    map_key = f"{key}_{round(lat, 4)}_{round(lon, 4)}"
+    with container:
+        st_folium(m, width=1100, height=height, key=map_key)
+
+
 # ── SIDEBAR ────────────────────────────────────────────────────────────────
 
 st.sidebar.title("📍 Rider App")
@@ -291,7 +380,15 @@ if panel == "🔧 Admin Panel":
 # ══════════════════════════════════════════════════════════════════════════════
 
 elif panel == "👤 User Panel":
-    st.title("👤 User Panel — Route & Report")
+    st.subheader("👤 User Panel — Route & Report")
+
+    # Force a rerun every 15s so the map keeps tracking the rider even
+    # when they haven't moved far enough to trigger the GPS component's
+    # own throttle. Falls back gracefully if the package isn't installed.
+    if HAS_AUTOREFRESH:
+        st_autorefresh(interval=15_000, key="rider_map_autorefresh")
+    else:
+        st.caption("⚠️ Install `streamlit-autorefresh` (`pip install streamlit-autorefresh`) to enable automatic 15s map updates.")
 
     locations = st.session_state.data["locations"]
     if not locations:
@@ -322,10 +419,30 @@ elif panel == "👤 User Panel":
             elif st.session_state.user_lat is None:
                 st.info("Waiting for GPS... Allow location access in browser.")
 
+    # ── Live "Google Maps style" tracking map ───────────────────────────
+    # Always visible once we have a GPS fix, even before a route is
+    # calculated — mirrors the "blue dot on a live map" feel.
+    if st.session_state.user_lat is not None:
+        st.subheader("🗺️ Live Location")
+        live_map_container = st.container()
+        render_live_map(
+            live_map_container,
+            st.session_state.user_lat,
+            st.session_state.user_lon,
+            locations=locations,
+            optimal_order=st.session_state.route_order,
+            visited_indices=st.session_state.visited_indices,
+            current_target_idx=st.session_state.current_target_idx,
+            route_geometry=st.session_state.route_geometry,
+            key="live_tracking_map",
+            zoom=17,
+            height=420,
+        )
+
     st.divider()
 
     # ── Route Calculation ────────────────────────────────────────────────
-    st.subheader("🗺️ Optimal Route")
+    st.subheader("🚗 Optimal Route")
 
     col_calc, col_reset = st.columns([1, 1])
     with col_calc:
@@ -369,7 +486,7 @@ elif panel == "👤 User Panel":
 
     st.divider()
 
-    # ── Map & Progress ───────────────────────────────────────────────────
+    # ── Route Progress & Map ─────────────────────────────────────────────
     if st.session_state.route_order is not None and st.session_state.user_lat is not None:
         optimal_order = st.session_state.route_order
         remaining = [i for i in optimal_order if i not in st.session_state.visited_indices]
@@ -397,54 +514,12 @@ elif panel == "👤 User Panel":
 
         st.divider()
 
-        # Map
-        try:
-            import folium
-            from streamlit_folium import st_folium
-            HAS_FOLIUM = True
-        except ImportError:
-            HAS_FOLIUM = False
+        if st.session_state.route_distance:
+            dist_km = st.session_state.route_distance / 1000
+            dur_min = st.session_state.route_duration / 60
+            st.info(f"🚗 **{dist_km:.1f} km** total | ⏱️ **{dur_min:.0f} min** estimated")
 
-        if HAS_FOLIUM:
-            center_lat = st.session_state.user_lat
-            center_lon = st.session_state.user_lon
-            m = folium.Map(location=[center_lat, center_lon], zoom_start=14)
-
-            folium.Marker(
-                [center_lat, center_lon],
-                tooltip="You are here",
-                icon=folium.Icon(color="red", icon="user", prefix="fa")
-            ).add_to(m)
-
-            for rank, idx in enumerate(optimal_order):
-                loc = locations[idx]
-                visited = idx in st.session_state.visited_indices
-                is_current = idx == st.session_state.current_target_idx
-                if visited:
-                    color = "green"
-                    icon_name = "check-circle"
-                elif is_current:
-                    color = "orange"
-                    icon_name = "flag"
-                else:
-                    color = "blue"
-                    icon_name = "map-marker"
-                folium.Marker(
-                    [loc["lat"], loc["lon"]],
-                    tooltip=f"{'✅ ' if visited else ''}{loc['name']} (stop #{rank+1})",
-                    icon=folium.Icon(color=color, icon=icon_name, prefix="fa")
-                ).add_to(m)
-
-            if st.session_state.route_geometry:
-                route_coords = [[c[1], c[0]] for c in st.session_state.route_geometry]
-                folium.PolyLine(route_coords, color="#0066ff", weight=5, opacity=0.8).add_to(m)
-
-            if st.session_state.route_distance:
-                dist_km = st.session_state.route_distance / 1000
-                dur_min = st.session_state.route_duration / 60
-                st.info(f"🚗 **{dist_km:.1f} km** total | ⏱️ **{dur_min:.0f} min** estimated")
-
-            st_folium(m, width=1100, height=450, key="route_map")
+        st.caption("Route overlay is shown on the live map above — it updates automatically as you move.")
 
     st.divider()
 
