@@ -1,0 +1,59 @@
+{
+  "locations": [
+    {
+      "id": "1",
+      "name": "rokomari",
+      "lat": 23.72925577702136,
+      "lon": 90.42258359019003,
+      "qr_value": "rokomari",
+      "issues": [
+        "Company closed",
+        "Product not available",
+        "Store not found",
+        "Wrong location",
+        "Out of stock",
+        "Address not found",
+        "No response",
+        "Damaged goods",
+        "Other"
+      ]
+    },
+    {
+      "id": "2",
+      "name": "TT Para Under Pass",
+      "lat": 23.725637287056255,
+      "lon": 90.42539756015478,
+      "qr_value": "TT Para Under Pass",
+      "issues": [
+        "Company closed",
+        "Product not available",
+        "Store not found",
+        "Wrong location",
+        "Out of stock",
+        "Address not found",
+        "No response",
+        "Damaged goods",
+        "Other"
+      ]
+    },
+    {
+      "id": "3",
+      "name": "TT Para Unique Bus Counter",
+      "lat": 23.72691906000649,
+      "lon": 90.42901854222988,
+      "qr_value": "TT Para Unique Bus Counter",
+      "issues": [
+        "Company closed",
+        "Product not available",
+        "Store not found",
+        "Wrong location",
+        "Out of stock",
+        "Address not found",
+        "No response",
+        "Damaged goods",
+        "Other"
+      ]
+    }
+  ],
+  "reports": []
+}

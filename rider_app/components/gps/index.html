@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@500;600&display=swap');
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: transparent; }
+
+  .gps-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #131B2E 0%, #182338 100%);
+    border: 1px solid #23304A;
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    color: #E7ECF3;
+  }
+
+  .gps-icon {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: rgba(255, 138, 61, 0.14);
+    border: 1px solid rgba(255, 138, 61, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    position: relative;
+  }
+
+  .gps-dot {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #34D399;
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
+    animation: pulse 1.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55); }
+    70%  { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+  }
+
+  .gps-text { min-width: 0; }
+
+  .gps-label {
+    font-size: 10.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: #7C8AA5;
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+
+  #gps-status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: #E7ECF3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+</style>
+</head>
+<body>
+<div class="gps-card">
+  <div class="gps-icon">📡<span class="gps-dot"></span></div>
+  <div class="gps-text">
+    <div class="gps-label">GPS Tracking</div>
+    <span id="gps-status">Starting...</span>
+  </div>
+</div>
+<script>
+(function() {
+    var status = document.getElementById("gps-status");
+    var lastLat = null;
+    var lastLon = null;
+    var watchId = null;
+
+    // ── Throttle settings: only push a new value to Streamlit (which
+    // triggers a full script rerun) when the rider has moved a real
+    // distance AND enough time has passed. This stops GPS jitter from
+    // causing the map to rebuild continuously.
+    var MIN_MOVE_METERS = 8;
+    var MIN_INTERVAL_MS = 4000;
+    var lastSentLat = null;
+    var lastSentLon = null;
+    var lastSentTime = 0;
+
+    function haversineMeters(lat1, lon1, lat2, lon2) {
+        var R = 6371000;
+        var toRad = function(d) { return d * Math.PI / 180; };
+        var dphi = toRad(lat2 - lat1);
+        var dlam = toRad(lon2 - lon1);
+        var a = Math.sin(dphi/2) ** 2 +
+                Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dlam/2) ** 2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function postToStreamlit(type, data) {
+        var msg = Object.assign({ isStreamlitMessage: true, type: type }, data || {});
+        window.parent.postMessage(msg, "*");
+    }
+
+    function send(v) {
+        postToStreamlit("streamlit:setComponentValue", { value: v, dataType: "json" });
+    }
+
+    function setFrameHeight() {
+        postToStreamlit("streamlit:setFrameHeight", {
+            height: document.body.scrollHeight || 80
+        });
+    }
+
+    // Step 1: Immediately signal readiness to Streamlit
+    postToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+    setFrameHeight();
+
+    // Step 2: Send cached position from localStorage if available
+    var cached = localStorage.getItem("rider_gps");
+    if (cached) {
+        try {
+            var p = JSON.parse(cached);
+            status.innerText = "Cached: " + p.lat.toFixed(6) + ", " + p.lon.toFixed(6);
+            send(cached);
+            lastLat = p.lat;
+            lastLon = p.lon;
+            lastSentLat = p.lat;
+            lastSentLon = p.lon;
+            lastSentTime = Date.now();
+        } catch(e) {}
+    }
+
+    // Step 3: Start live GPS tracking
+    if (!navigator.geolocation) {
+        status.innerText = "Geolocation not supported";
+        if (lastLat === null) send(JSON.stringify({error: "Geolocation not supported"}));
+    } else {
+        status.innerText = cached ? "Updating..." : "Requesting location access...";
+        watchId = navigator.geolocation.watchPosition(
+            function(pos) {
+                lastLat = pos.coords.latitude;
+                lastLon = pos.coords.longitude;
+
+                // Always cache locally so the value is fresh on reload,
+                // but only PUSH to Streamlit (triggering a rerun) when
+                // it's a meaningful update.
+                var val = JSON.stringify({lat: lastLat, lon: lastLon});
+                localStorage.setItem("rider_gps", val);
+                status.innerText = lastLat.toFixed(6) + ", " + lastLon.toFixed(6);
+
+                var now = Date.now();
+                var movedEnough = (lastSentLat === null) ||
+                    haversineMeters(lastSentLat, lastSentLon, lastLat, lastLon) >= MIN_MOVE_METERS;
+                var timeEnough = (now - lastSentTime) >= MIN_INTERVAL_MS;
+
+                if (movedEnough && timeEnough) {
+                    send(val);
+                    setFrameHeight();
+                    lastSentLat = lastLat;
+                    lastSentLon = lastLon;
+                    lastSentTime = now;
+                }
+            },
+            function(err) {
+                if (lastLat === null) {
+                    status.innerText = "Error: " + err.message;
+                    var cached2 = localStorage.getItem("rider_gps");
+                    if (cached2) {
+                        try {
+                            var p = JSON.parse(cached2);
+                            status.innerText = "Fallback: " + p.lat.toFixed(6) + ", " + p.lon.toFixed(6);
+                            send(cached2);
+                        } catch(e) {
+                            send(JSON.stringify({error: err.message}));
+                        }
+                    } else {
+                        send(JSON.stringify({error: err.message}));
+                    }
+                    setFrameHeight();
+                }
+            },
+            {enableHighAccuracy: true, maximumAge: 5000, timeout: 15000}
+        );
+    }
+
+    // Step 4: Handle re-render events (resend last known SENT position,
+    // not the raw last position, so a re-render doesn't itself trigger
+    // a spurious "moved" update)
+    window.addEventListener("message", function(event) {
+        if (event.data && event.data.type === "streamlit:render") {
+            if (lastSentLat !== null) {
+                send(JSON.stringify({lat: lastSentLat, lon: lastSentLon}));
+            } else if (lastLat !== null) {
+                send(JSON.stringify({lat: lastLat, lon: lastLon}));
+            }
+        }
+    });
+})();
+</script>
+</body>
+</html>

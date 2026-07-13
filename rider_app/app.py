@@ -11,11 +11,207 @@ from PIL import Image
 
 st.set_page_config(layout="wide", page_title="Rider App - Route & QR Scanner", page_icon="📍")
 
+# ── Global styling ────────────────────────────────────────────────────────
+# Presentation only — no app logic lives in this block.
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
+h1, h2, h3 { font-family: 'Space Grotesk', sans-serif !important; letter-spacing: -0.01em; }
+code, .stCode, .stCodeBlock, [data-testid="stMetricValue"] { font-family: 'JetBrains Mono', monospace !important; }
+
+:root{
+  --bg:        #0B1120;
+  --panel:     #131B2E;
+  --panel-2:   #182338;
+  --line:      #23304A;
+  --text:      #E7ECF3;
+  --muted:     #7C8AA5;
+  --amber:     #FF8A3D;
+  --green:     #34D399;
+  --red:       #F2555A;
+}
+
+/* App chrome */
+[data-testid="stAppViewContainer"] { background: var(--bg); }
+[data-testid="stSidebar"] {
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+[data-testid="stSidebar"] .stRadio label { font-family: 'Inter', sans-serif; }
+
+/* App title band */
+.rider-header {
+  display:flex; align-items:center; gap:12px;
+  padding: 6px 0 18px 0;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 22px;
+}
+.rider-header .tag {
+  font-family:'JetBrains Mono', monospace; font-size:11px; letter-spacing:.12em;
+  color: var(--amber); background: rgba(255,138,61,0.12);
+  border:1px solid rgba(255,138,61,0.35); padding:3px 8px; border-radius:4px;
+  text-transform:uppercase;
+}
+
+/* Section cards */
+.rider-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-bottom: 4px;
+}
+.rider-eyebrow {
+  font-family:'JetBrains Mono', monospace; font-size:11px; letter-spacing:.14em;
+  color: var(--muted); text-transform:uppercase; margin-bottom:2px;
+}
+
+/* Buttons */
+.stButton>button {
+  border-radius: 6px !important;
+  border: 1px solid var(--line) !important;
+  font-weight: 600 !important;
+  font-family: 'Inter', sans-serif !important;
+}
+.stButton>button[kind="primary"] {
+  background: var(--amber) !important;
+  border-color: var(--amber) !important;
+  color: #1a1206 !important;
+}
+
+/* Stop rail (visit-order list) */
+.rail { position:relative; padding-left: 6px; }
+.rail-stop {
+  display:flex; align-items:center; gap:10px;
+  padding: 7px 4px; font-size: 0.92em;
+  border-bottom: 1px dashed var(--line);
+}
+.rail-stop:last-child { border-bottom:none; }
+.rail-dot {
+  flex:0 0 auto; width:22px; height:22px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  font-family:'JetBrains Mono', monospace; font-size:11px; font-weight:600;
+  border:1.5px solid var(--line); color: var(--muted);
+}
+.rail-dot.done { background: rgba(52,211,153,0.15); border-color: var(--green); color: var(--green); }
+.rail-dot.current { background: rgba(255,138,61,0.18); border-color: var(--amber); color: var(--amber); }
+.rail-label { color: var(--text); }
+.rail-label.done { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line); }
+.rail-label.current { color: var(--amber); font-weight:600; }
+
+hr, [data-testid="stDivider"] { border-color: var(--line) !important; }
+
+/* ── App shell: make the web page read as a mobile app, not a dashboard ── */
+
+/* Hide Streamlit's browser-chrome: main menu, footer, the "Deploy" header */
+#MainMenu, footer, header[data-testid="stHeader"] { visibility: hidden; height: 0; }
+
+[data-testid="stAppViewContainer"] {
+  background: radial-gradient(circle at 50% 0%, #16213a 0%, #060a14 65%);
+}
+[data-testid="stAppViewContainer"] > .main { display: flex; justify-content: center; }
+
+/* Constrain to a phone-width column and pad for the fixed bottom tab bar */
+.block-container {
+  max-width: 480px !important;
+  padding-top: 0 !important;
+  padding-bottom: 96px !important;
+  padding-left: 22px !important;
+  padding-right: 22px !important;
+}
+
+/* On wider screens, frame it like an app card floating on the page */
+@media (min-width: 620px) {
+  .block-container {
+    margin-top: 28px;
+    margin-bottom: 28px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 26px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.02);
+    min-height: 88vh;
+    overflow: hidden;
+  }
+}
+
+/* Sticky top app bar */
+.app-bar {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+  margin: 0 -22px 18px -22px;
+  padding: 14px 22px 12px 22px;
+  background: rgba(11,17,32,0.85);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.app-bar .brand { display:flex; align-items:center; gap:9px; }
+.app-bar .brand-icon {
+  width: 32px; height: 32px; border-radius: 9px;
+  background: linear-gradient(135deg, var(--amber), #ffb178);
+  display:flex; align-items:center; justify-content:center;
+  font-size: 15px; box-shadow: 0 4px 14px rgba(255,138,61,0.35);
+}
+.app-bar .brand-text { line-height:1.1; }
+.app-bar .brand-text .name { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:15px; color:var(--text); }
+.app-bar .brand-text .sub { font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:.1em; color:var(--muted); text-transform:uppercase; }
+.app-bar .status-chip {
+  display:flex; align-items:center; gap:6px;
+  font-family:'JetBrains Mono',monospace; font-size:10.5px; font-weight:600;
+  padding: 5px 10px; border-radius: 20px; border:1px solid var(--line);
+  color: var(--muted); white-space:nowrap;
+}
+.app-bar .status-chip.live { color: var(--green); border-color: rgba(52,211,153,0.4); background: rgba(52,211,153,0.08); }
+.app-bar .status-chip .chip-dot { width:6px; height:6px; border-radius:50%; background: currentColor; }
+
+/* Bottom tab bar — turns the panel-select radio into an app nav bar */
+div.element-container:has(#tabbar-anchor) { display:none; }
+div.element-container:has(#tabbar-anchor) + div.element-container {
+  position: fixed; left: 50%; bottom: 0; transform: translateX(-50%);
+  width: 100%; max-width: 480px;
+  z-index: 999;
+  background: rgba(19,27,46,0.92);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid var(--line);
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -10px 30px rgba(0,0,0,0.4);
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)) 10px;
+}
+div.element-container:has(#tabbar-anchor) + div.element-container [data-testid="stWidgetLabel"] { display:none; }
+div.element-container:has(#tabbar-anchor) + div.element-container [role="radiogroup"] {
+  display:flex; gap:6px; flex-direction:row;
+}
+div.element-container:has(#tabbar-anchor) + div.element-container [role="radiogroup"] label {
+  flex:1; display:flex; align-items:center; justify-content:center;
+  padding: 10px 6px; border-radius: 12px; cursor:pointer;
+  font-family:'Inter',sans-serif; font-weight:600; font-size:13px;
+  color: var(--muted); transition: all .15s ease; gap:6px;
+}
+div.element-container:has(#tabbar-anchor) + div.element-container [role="radiogroup"] label:has(input:checked) {
+  color: var(--amber); background: rgba(255,138,61,0.14);
+}
+div.element-container:has(#tabbar-anchor) + div.element-container [role="radiogroup"] label > div:first-child { display:none; }
+
+/* App-card look for expanders/tabs so they feel like native app rows */
+[data-testid="stExpander"] {
+  border: 1px solid var(--line) !important;
+  border-radius: 12px !important;
+  background: var(--panel) !important;
+  overflow: hidden;
+}
+.stTabs [data-baseweb="tab-list"] { gap: 4px; }
+.stTabs [data-baseweb="tab"] {
+  border-radius: 10px 10px 0 0 !important;
+  font-weight: 600;
+}
+</style>
+""", unsafe_allow_html=True)
+
 DATA_FILE = "tracker_data.json"
 
 # ── GPS & QR Components (declare_component with local paths) ────────────────
-
-_COMPONENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "gps")
 
 _COMPONENTS_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "components")
 
@@ -189,17 +385,40 @@ def find_nearest(user_lat, user_lon, locations):
     return min_idx, min_dist
 
 
-# ── SIDEBAR ────────────────────────────────────────────────────────────────
+# ── TOP APP BAR ──────────────────────────────────────────────────────────
 
-st.sidebar.title("📍 Rider App")
-panel = st.sidebar.radio("Select Panel", ["👤 User Panel", "🔧 Admin Panel"])
+_gps_live = st.session_state.get("user_lat") is not None
+st.markdown(
+    "<div class='app-bar'>"
+    "<div class='brand'>"
+    "<div class='brand-icon'>📍</div>"
+    "<div class='brand-text'><div class='name'>Rider</div><div class='sub'>Dispatch Console</div></div>"
+    "</div>"
+    f"<div class='status-chip {'live' if _gps_live else ''}'>"
+    f"<span class='chip-dot'></span>{'GPS Live' if _gps_live else 'GPS Off'}</div>"
+    "</div>",
+    unsafe_allow_html=True
+)
+
+# ── BOTTOM TAB BAR ───────────────────────────────────────────────────────
+# Same widget and same two options as before — only its position and look
+# changed, from a sidebar list to a fixed app-style tab bar (via CSS below).
+st.markdown("<div id='tabbar-anchor'></div>", unsafe_allow_html=True)
+panel = st.radio(
+    "Select Panel", ["👤 User Panel", "🔧 Admin Panel"],
+    horizontal=True, label_visibility="collapsed", key="panel_nav"
+)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  ADMIN PANEL
 # ══════════════════════════════════════════════════════════════════════════════
 
 if panel == "🔧 Admin Panel":
-    st.title("🔧 Admin Panel")
+    st.markdown(
+        "<div class='rider-header'><h1 style='margin:0;'>🔧 Admin Panel</h1>"
+        "<span class='tag'>Locations · QR · Reports</span></div>",
+        unsafe_allow_html=True
+    )
     tab1, tab2, tab3 = st.tabs(["📍 Manage Locations", "🎫 QR Codes", "📋 Reports"])
 
     with tab1:
@@ -291,7 +510,11 @@ if panel == "🔧 Admin Panel":
 # ══════════════════════════════════════════════════════════════════════════════
 
 elif panel == "👤 User Panel":
-    st.title("👤 User Panel — Route & Report")
+    st.markdown(
+        "<div class='rider-header'><h1 style='margin:0;'>👤 User Panel</h1>"
+        "<span class='tag'>Route &amp; Report</span></div>",
+        unsafe_allow_html=True
+    )
 
     locations = st.session_state.data["locations"]
     if not locations:
@@ -302,9 +525,11 @@ elif panel == "👤 User Panel":
     with st.container():
         gps_col, status_col = st.columns([1, 2])
         with gps_col:
+            st.markdown("<div class='rider-eyebrow'>Live Position</div>", unsafe_allow_html=True)
             st.subheader("📡 GPS")
             gps_val = _gps_component(key="rider_gps_tracker")
         with status_col:
+            st.markdown("<div class='rider-eyebrow'>&nbsp;</div>", unsafe_allow_html=True)
             st.subheader("📍 Your Position")
             if gps_val is not None:
                 try:
@@ -379,21 +604,27 @@ elif panel == "👤 User Panel":
         done = total - len(remaining)
         st.progress(done / total, text=f"Progress: {done}/{total} stops completed")
 
-        # Stop list
-        st.markdown("**🛑 Visit Order:**")
-        cols = st.columns(min(total, 4))
+        # Stop list — rendered as a rail (styling only; order/state logic unchanged)
+        st.markdown("<div class='rider-eyebrow' style='margin-top:10px;'>Visit Order</div>", unsafe_allow_html=True)
+        rail_html = "<div class='rider-card rail'>"
         for rank, idx in enumerate(optimal_order):
             loc = locations[idx]
             visited = idx in st.session_state.visited_indices
             is_current = idx == st.session_state.current_target_idx
             if visited:
-                icon = "✅"
+                dot_cls, dot_txt, label_cls = "done", "✓", "done"
             elif is_current:
-                icon = "⏺️"
+                dot_cls, dot_txt, label_cls = "current", "●", "current"
             else:
-                icon = f"{rank+1}."
-            label = f"{icon} {loc['name']}"
-            st.markdown(f"<span style='font-size:0.9em'>{label}</span>", unsafe_allow_html=True)
+                dot_cls, dot_txt, label_cls = "", str(rank + 1), ""
+            rail_html += (
+                f"<div class='rail-stop'>"
+                f"<div class='rail-dot {dot_cls}'>{dot_txt}</div>"
+                f"<div class='rail-label {label_cls}'>{loc['name']}</div>"
+                f"</div>"
+            )
+        rail_html += "</div>"
+        st.markdown(rail_html, unsafe_allow_html=True)
 
         st.divider()
 
@@ -468,7 +699,7 @@ elif panel == "👤 User Panel":
 
             st.info(f"🎯 **Target:** {target_loc['name']} — **{dist:.0f}m** away")
 
-            if dist <= 10:
+            if dist <= 50:
                 st.success(f"✅ You've arrived at **{target_loc['name']}** — QR scanner unlocked!")
 
                 scanned_result = _qr_component(key="qr_target")
@@ -521,7 +752,7 @@ elif panel == "👤 User Panel":
                 else:
                     st.info("Point your camera at the location's QR code.")
             else:
-                need = int(dist - 10)
+                need = int(dist - 50)
                 st.warning(f"🔒 Scanner locked — **{need}m** closer needed to reach **{target_loc['name']}**")
         else:
             # No route calculated or all visited — use nearest location
@@ -530,7 +761,7 @@ elif panel == "👤 User Panel":
             )
             nearest = locations[nearest_idx] if nearest_idx is not None else None
 
-            if nearest and nearest_dist <= 10:
+            if nearest and nearest_dist <= 50:
                 st.success(f"✅ Near **{nearest['name']}** — scanner unlocked!")
 
                 scanned_result = _qr_component(key="qr_nearest")
@@ -575,3 +806,4 @@ elif panel == "👤 User Panel":
                 st.info("No locations to scan.")
     else:
         st.info("Enable GPS location to use the QR scanner.")
+

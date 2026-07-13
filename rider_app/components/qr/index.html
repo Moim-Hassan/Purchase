@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@500;600&display=swap');
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: transparent; font-family: 'Inter', sans-serif; }
+
+  .qr-card {
+    max-width: 420px;
+    margin: 0 auto;
+    background: linear-gradient(135deg, #131B2E 0%, #182338 100%);
+    border: 1px solid #23304A;
+    border-radius: 10px;
+    padding: 14px;
+  }
+
+  .qr-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    color: #E7ECF3;
+  }
+
+  .qr-header .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #FF8A3D;
+    box-shadow: 0 0 0 3px rgba(255,138,61,0.18);
+  }
+
+  .qr-header .title {
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: #7C8AA5;
+    font-weight: 600;
+  }
+
+  #qr-reader {
+    width: 100%;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #23304A;
+  }
+
+  #qr-status {
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #7C8AA5;
+    margin-top: 10px;
+  }
+</style>
+</head>
+<body>
+<div class="qr-card">
+  <div class="qr-header"><span class="dot"></span><span class="title">QR Scanner</span></div>
+  <div id="qr-reader"></div>
+  <div id="qr-status"></div>
+</div>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+(function() {
+    var lastResult = "";
+    var statusEl = document.getElementById("qr-status");
+
+    function postToStreamlit(type, data) {
+        var msg = Object.assign({ isStreamlitMessage: true, type: type }, data || {});
+        window.parent.postMessage(msg, "*");
+    }
+
+    function send(v) {
+        postToStreamlit("streamlit:setComponentValue", { value: v, dataType: "json" });
+    }
+
+    function setFrameHeight() {
+        postToStreamlit("streamlit:setFrameHeight", {
+            height: document.body.scrollHeight || 400
+        });
+    }
+
+    // Step 1: Signal readiness immediately
+    postToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+
+    // Step 2: Give the iframe real height so the camera view is visible
+    setFrameHeight();
+
+    // Step 3: Start QR scanner
+    var scanner = new Html5Qrcode("qr-reader");
+    scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        function onScanSuccess(decodedText) {
+            if (decodedText !== lastResult) {
+                lastResult = decodedText;
+                send(decodedText);
+            }
+        },
+        function onScanFailure() {}
+    ).then(function() {
+        statusEl.innerText = "Camera active — point at QR code";
+        // Camera video element loads async — resize the frame again
+        // shortly after start() resolves so it isn't clipped
+        setTimeout(setFrameHeight, 500);
+    }).catch(function(err) {
+        statusEl.innerText = "Camera error: " + err;
+        setFrameHeight();
+    });
+
+    // Resend last scan on re-render, so a Streamlit rerun doesn't lose it
+    window.addEventListener("message", function(event) {
+        if (event.data && event.data.type === "streamlit:render") {
+            if (lastResult) {
+                send(lastResult);
+            }
+        }
+    });
+})();
+</script>
+</body>
+</html>

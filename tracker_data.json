@@ -1,23 +1,6 @@
 {
   "locations": [
     {
-      "id": "1",
-      "name": "Rokomari",
-      "lat": 23.729221059451092,
-      "lon": 90.42257835655015,
-      "issues": [
-        "Company closed",
-        "Product not available",
-        "Store not found",
-        "Wrong location",
-        "Out of stock",
-        "Address not found",
-        "No response",
-        "Damaged goods",
-        "Other"
-      ]
-    },
-    {
       "id": "2",
       "name": "Kamalaur",
       "lat": 23.73187852733558,
