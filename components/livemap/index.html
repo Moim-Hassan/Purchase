@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html, body { margin:0; padding:0; }
+  #map-wrap {
+    position:relative; width:100%; height:460px;
+    border-radius:12px; overflow:hidden; box-shadow:0 1px 8px rgba(0,0,0,0.18);
+  }
+  #map { width:100%; height:100%; background:#e8eaed; }
+
+  .recenter-btn {
+    position:absolute; right:12px; bottom:24px; z-index:1000;
+    width:42px; height:42px; border-radius:50%; background:#fff;
+    box-shadow:0 1px 5px rgba(0,0,0,0.35); display:flex; align-items:center; justify-content:center;
+    cursor:pointer; font-size:19px; border:none; transition:background 0.15s;
+  }
+  .recenter-btn:hover { background:#f1f3f4; }
+  .recenter-btn.following { color:#4285F4; }
+  .recenter-btn.not-following { color:#5f6368; }
+
+  .eta-badge {
+    position:absolute; left:12px; top:12px; z-index:1000;
+    background:rgba(255,255,255,0.97); padding:7px 14px; border-radius:20px;
+    font-family:-apple-system,Roboto,Arial,sans-serif; font-size:13px; font-weight:600;
+    color:#202124; box-shadow:0 1px 5px rgba(0,0,0,0.22);
+    max-width:75%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+
+  .user-dot-wrap { position:relative; width:22px; height:22px; }
+  .user-dot-pulse {
+    position:absolute; top:0; left:0; width:22px; height:22px;
+    background:rgba(66,133,244,0.35); border-radius:50%;
+    animation:riderPulse 1.6s infinite;
+  }
+  .user-dot-core {
+    position:absolute; top:6px; left:6px; width:10px; height:10px;
+    background:#4285F4; border:2px solid #fff; border-radius:50%;
+    box-shadow:0 0 4px rgba(0,0,0,0.5);
+  }
+  @keyframes riderPulse {
+    0%   { transform:scale(0.6); opacity:0.9; }
+    70%  { transform:scale(2.4); opacity:0; }
+    100% { transform:scale(2.4); opacity:0; }
+  }
+</style>
+</head>
+<body>
+<div id="map-wrap">
+  <div id="map"></div>
+  <div class="eta-badge" id="etaBadge" style="display:none;"></div>
+  <button class="recenter-btn following" id="recenterBtn" title="Recenter on me">&#127919;</button>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function() {
+    var map = null;
+    var userMarker = null;
+    var routeLine = null;
+    var stopMarkers = {};
+    var followMode = true;
+    var lastLat = null, lastLon = null;
+    var initialized = false;
+
+    function postToStreamlit(type, data) {
+        var msg = Object.assign({ isStreamlitMessage: true, type: type }, data || {});
+        window.parent.postMessage(msg, "*");
+    }
+    function setFrameHeight() {
+        postToStreamlit("streamlit:setFrameHeight", { height: 480 });
+    }
+
+    function userIcon() {
+        return L.divIcon({
+            className: '',
+            html: '<div class="user-dot-wrap"><div class="user-dot-pulse"></div><div class="user-dot-core"></div></div>',
+            iconSize: [22, 22],
+            iconAnchor: [11, 11],
+        });
+    }
+
+    // Google-Maps-style teardrop pin: colored by status, numbered by stop order
+    function stopIcon(status, rank) {
+        var color = status === 'visited' ? '#34A853' : (status === 'current' ? '#FBBC05' : '#4285F4');
+        var symbol = status === 'visited' ? '&#10003;' : rank;
+        return L.divIcon({
+            className: '',
+            html: '<div style="background:' + color + ';width:28px;height:28px;border-radius:50% 50% 50% 0;' +
+                  'transform:rotate(-45deg);display:flex;align-items:center;justify-content:center;' +
+                  'box-shadow:0 2px 5px rgba(0,0,0,0.35);border:2px solid white;">' +
+                  '<span style="transform:rotate(45deg);font-size:12px;font-weight:700;color:#fff;">' + symbol + '</span></div>',
+            iconSize: [28, 28],
+            iconAnchor: [14, 28],
+            popupAnchor: [0, -28],
+        });
+    }
+
+    function updateRecenterBtn() {
+        var btn = document.getElementById('recenterBtn');
+        btn.className = 'recenter-btn ' + (followMode ? 'following' : 'not-following');
+    }
+
+    // Map is created exactly once. Every later update just moves things
+    // around inside it — this is what stops the "full reload" flicker.
+    function initMap(lat, lon, zoom) {
+        map = L.map('map', { zoomControl: true, attributionControl: false }).setView([lat, lon], zoom || 17);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            maxZoom: 20,
+            attribution: '&copy; CARTO &copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        userMarker = L.marker([lat, lon], { icon: userIcon(), zIndexOffset: 1000 })
+            .addTo(map)
+            .bindTooltip("You are here");
+
+        // If the rider manually drags the map, stop auto-following until
+        // they tap the recenter button — same behavior as Google Maps nav.
+        map.on('dragstart', function() {
+            followMode = false;
+            updateRecenterBtn();
+        });
+
+        document.getElementById('recenterBtn').addEventListener('click', function() {
+            followMode = true;
+            updateRecenterBtn();
+            if (lastLat !== null) {
+                map.flyTo([lastLat, lastLon], Math.max(map.getZoom(), 17), { duration: 0.8 });
+            }
+        });
+
+        initialized = true;
+        lastLat = lat;
+        lastLon = lon;
+    }
+
+    function updateStops(stops, routeCoords) {
+        var seen = {};
+        (stops || []).forEach(function(s) {
+            seen[s.id] = true;
+            var tooltipText = (s.status === 'visited' ? '\u2705 ' : '') + s.name + ' (stop #' + s.rank + ')';
+            if (stopMarkers[s.id]) {
+                stopMarkers[s.id].setIcon(stopIcon(s.status, s.rank));
+                stopMarkers[s.id].setTooltipContent(tooltipText);
+            } else {
+                var mk = L.marker([s.lat, s.lon], { icon: stopIcon(s.status, s.rank) })
+                    .addTo(map)
+                    .bindTooltip(tooltipText);
+                stopMarkers[s.id] = mk;
+            }
+        });
+        Object.keys(stopMarkers).forEach(function(id) {
+            if (!seen[id]) {
+                map.removeLayer(stopMarkers[id]);
+                delete stopMarkers[id];
+            }
+        });
+
+        if (routeCoords && routeCoords.length > 1) {
+            if (routeLine) {
+                routeLine.setLatLngs(routeCoords);
+            } else {
+                routeLine = L.polyline(routeCoords, { color: '#4285F4', weight: 6, opacity: 0.85 }).addTo(map);
+            }
+        } else if (routeLine) {
+            map.removeLayer(routeLine);
+            routeLine = null;
+        }
+    }
+
+    function updateBadge(text) {
+        var el = document.getElementById('etaBadge');
+        if (text) {
+            el.style.display = 'block';
+            el.textContent = '\u{1F3AF} ' + text;
+        } else {
+            el.style.display = 'none';
+        }
+    }
+
+    function handlePayload(payload) {
+        var data;
+        try { data = JSON.parse(payload); } catch (e) { return; }
+        if (!data || typeof data.lat !== 'number' || typeof data.lon !== 'number') return;
+
+        if (!initialized) {
+            initMap(data.lat, data.lon, data.zoom);
+        } else {
+            userMarker.setLatLng([data.lat, data.lon]);
+            if (followMode) {
+                map.panTo([data.lat, data.lon], { animate: true, duration: 0.6 });
+            }
+            lastLat = data.lat;
+            lastLon = data.lon;
+        }
+        updateStops(data.stops, data.route);
+        updateBadge(data.badge);
+    }
+
+    postToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+    setFrameHeight();
+
+    window.addEventListener("message", function(event) {
+        if (!event.data) return;
+        if (event.data.type === "streamlit:render") {
+            var args = event.data.args || {};
+            if (args.payload) handlePayload(args.payload);
+            setFrameHeight();
+        }
+    });
+})();
+</script>
+</body>
+</html>
