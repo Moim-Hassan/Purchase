@@ -511,7 +511,7 @@ elif panel == "👤 User Panel":
 
             st.info(f"🎯 **Target:** {target_loc['name']} — **{dist:.0f}m** away")
 
-            if dist <= 10:
+            if dist <= 30:
                 st.success(f"✅ You've arrived at **{target_loc['name']}** — QR scanner unlocked!")
 
                 scanned_result = _qr_component(key="qr_target")
@@ -564,7 +564,7 @@ elif panel == "👤 User Panel":
                 else:
                     st.info("Point your camera at the location's QR code.")
             else:
-                need = int(dist - 10)
+                need = int(dist - 30)
                 st.warning(f"🔒 Scanner locked — **{need}m** closer needed to reach **{target_loc['name']}**")
         else:
             nearest_idx, nearest_dist = find_nearest(
@@ -572,7 +572,7 @@ elif panel == "👤 User Panel":
             )
             nearest = locations[nearest_idx] if nearest_idx is not None else None
 
-            if nearest and nearest_dist <= 10:
+            if nearest and nearest_dist <= 30:
                 st.success(f"✅ Near **{nearest['name']}** — scanner unlocked!")
 
                 scanned_result = _qr_component(key="qr_nearest")
